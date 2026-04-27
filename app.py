@@ -102,8 +102,11 @@ def predict_prices(model, df, cols, days=30):
         # Get features
         features = []
         for col in cols:
-            val = float(last_row[col])
-            features.append(val)
+            val = last_row[col]
+            # Ensure it's a Python scalar
+            if hasattr(val, 'item'):
+                val = val.item()
+            features.append(float(val))
         
         X = np.array([features])
         next_price = float(model.predict(X)[0])
@@ -114,7 +117,8 @@ def predict_prices(model, df, cols, days=30):
         last_row['Lag_3'] = float(last_row['Lag_2'])
         last_row['Lag_2'] = float(last_row['Lag_1'])
         last_row['Lag_1'] = next_price
-        last_row['MA_5'] = float(np.mean([last_row['Lag_1'], last_row['Lag_2'], last_row['Lag_3'], next_price, last_row['Close']]))
+        ma_5_val = float(np.mean([last_row['Lag_1'], last_row['Lag_2'], last_row['Lag_3'], next_price, last_row['Close']]))
+        last_row['MA_5'] = ma_5_val
     
     return np.array(predictions)
 
@@ -131,8 +135,9 @@ with st.spinner("Loading model..."):
     model, cols, df_proc = train_model(data)
 
 # Get current price
-current_price = float(data['Close'].values[-1])
-prev_price = float(data['Close'].values[-2])
+close_prices = data['Close'].values.flatten()
+current_price = float(close_prices[-1])
+prev_price = float(close_prices[-2])
 change = current_price - prev_price
 change_pct = (change / prev_price) * 100
 
@@ -143,7 +148,7 @@ with col1:
 with col2:
     st.metric("Change", f"₹{change:.2f}", f"{change_pct:.2f}%")
 with col3:
-    week_high = float(data['High'].tail(7).values.max())
+    week_high = float(data['High'].tail(7).values.flatten().max())
     st.metric("Week High", f"₹{week_high:.2f}")
 
 st.divider()
@@ -168,7 +173,7 @@ st.divider()
 
 # Analysis
 df_feat = create_features(data)
-current_rsi = float(df_feat['RSI'].values[-1])
+current_rsi = float(df_feat['RSI'].values.flatten()[-1])
 
 col1, col2, col3 = st.columns(3)
 with col1:
