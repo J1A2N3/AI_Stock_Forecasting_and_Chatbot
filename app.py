@@ -1,84 +1,83 @@
 import streamlit as st
 import yfinance as yf
-import pandas as pd
 import numpy as np
+import pandas as pd
 
-# ---------------- UI ----------------
-st.title("📈 AI Stock Predictor + Chatbot")
-
-ticker = st.text_input("Enter Stock Symbol", "RELIANCE.NS")
+st.title("📈 AI Stock Predictor (RELIANCE)")
 
 # ---------------- Load Data ----------------
 @st.cache_data
-def load_data(ticker):
+def load_data():
     try:
-        data = yf.download(ticker, period="1y", progress=False)
-        
+        data = yf.download("RELIANCE.NS", period="1y", progress=False)
+
         if data is None or data.empty:
             return None
-            
+
+        if 'Close' not in data.columns:
+            return None
+
         data = data[['Close']]
         data.dropna(inplace=True)
         return data
-        
+
     except:
         return None
 
-data = load_data(ticker)
+data = load_data()
 
-# ---------------- Error Handling ----------------
+# ---------------- Handle Error ----------------
 if data is None:
-    st.warning("⚠️ Could not fetch data. Try another stock symbol.")
+    st.error("❌ Failed to load RELIANCE data from Yahoo Finance.")
+    st.info("👉 This happens due to API blocking on cloud.\nTry refreshing or redeploying.")
     st.stop()
 
 # ---------------- Chart ----------------
-st.subheader("📊 Stock Price (Last 1 Year)")
-st.line_chart(data)
+st.subheader("📊 RELIANCE Stock Price")
+st.line_chart(data['Close'])   # FIXED
 
 # ---------------- Prediction ----------------
 def predict_future(days=30):
     last_prices = data['Close'].tail(60).values
-    
+
     predictions = []
     temp = list(last_prices)
 
     for _ in range(days):
-        next_val = sum(temp[-5:]) / 5   # moving average
+        next_val = sum(temp[-5:]) / 5
         temp.append(next_val)
         predictions.append(next_val)
 
-    return np.array(predictions).reshape(-1,1)
+    return np.array(predictions)
 
 future_prices = predict_future(30)
 
-# ---------------- Show Predictions ----------------
-st.subheader("📈 Future Predictions (Next 30 Days)")
+st.subheader("📈 Future Prediction")
 st.line_chart(future_prices)
 
 # ---------------- Chatbot ----------------
-st.subheader("💬 Ask AI about stock")
+st.subheader("💬 Ask about RELIANCE")
 
 user_input = st.text_input("Ask something:")
 
-def answer_question(question):
-    question = question.lower()
+def answer_question(q):
+    q = q.lower()
 
-    if "trend" in question:
-        return "Check the chart above for the trend 📊"
+    if "trend" in q:
+        return "Trend is visible in the chart above."
 
-    elif "price" in question or "future" in question:
-        return f"Predicted next price: {future_prices[0][0]:.2f}"
+    elif "future" in q or "price" in q:
+        return f"Next predicted price: {future_prices[0]:.2f}"
 
-    elif "next 5 days" in question:
-        return str(future_prices[:5].flatten())
+    elif "next 5 days" in q:
+        return str(future_prices[:5])
 
-    elif "invest" in question:
-        return "⚠️ This is a demo model — not financial advice"
+    elif "invest" in q:
+        return "⚠️ Demo model — not financial advice"
 
     else:
-        return "Try asking: trend, future price, next 5 days"
+        return "Try: trend, future price, next 5 days"
 
 if st.button("Ask"):
     if user_input:
-        response = answer_question(user_input)
-        st.success(response)
+        st.success(answer_question(user_input))
