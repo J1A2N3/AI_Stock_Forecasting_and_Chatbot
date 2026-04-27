@@ -216,7 +216,7 @@ with st.spinner("Loading data and training model..."):
         st.stop()
     
     model, feature_cols, feature_importance = train_model(data)
-    current_price = data['Close'].iloc[-1]
+    current_price = float(data['Close'].iloc[-1])
 
 st.success("✅ Model trained successfully!")
 
@@ -231,7 +231,7 @@ if 'trigger_ask' not in st.session_state:
 # ---------------- DISPLAY METRICS ----------------
 col1, col2, col3, col4 = st.columns(4)
 
-change = data['Close'].iloc[-1] - data['Close'].iloc[-2]
+change = float(data['Close'].iloc[-1]) - float(data['Close'].iloc[-2])
 change_pct = (change / data['Close'].iloc[-2]) * 100
 week_high = data['High'].tail(7).max()
 week_low = data['Low'].tail(7).min()
