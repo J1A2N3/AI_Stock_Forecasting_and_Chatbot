@@ -131,8 +131,8 @@ with st.spinner("Loading model..."):
     model, cols, df_proc = train_model(data)
 
 # Get current price
-current_price = float(data['Close'].iloc[-1])
-prev_price = float(data['Close'].iloc[-2])
+current_price = float(data['Close'].values[-1])
+prev_price = float(data['Close'].values[-2])
 change = current_price - prev_price
 change_pct = (change / prev_price) * 100
 
@@ -143,7 +143,7 @@ with col1:
 with col2:
     st.metric("Change", f"₹{change:.2f}", f"{change_pct:.2f}%")
 with col3:
-    week_high = float(data['High'].tail(7).max())
+    week_high = float(data['High'].tail(7).values.max())
     st.metric("Week High", f"₹{week_high:.2f}")
 
 st.divider()
@@ -168,7 +168,7 @@ st.divider()
 
 # Analysis
 df_feat = create_features(data)
-current_rsi = float(df_feat['RSI'].iloc[-1])
+current_rsi = float(df_feat['RSI'].values[-1])
 
 col1, col2, col3 = st.columns(3)
 with col1:
