@@ -3,10 +3,6 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 
-from sklearn.preprocessing import MinMaxScaler
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Dense, LSTM
-
 # ---------------- UI ----------------
 st.title("📈 AI Stock Predictor + Chatbot")
 
@@ -29,53 +25,23 @@ if data.empty:
 st.subheader("📊 Stock Price")
 st.line_chart(data)
 
-# ---------------- Preprocessing ----------------
-scaler = MinMaxScaler()
-scaled_data = scaler.fit_transform(data)
-
-def create_dataset(dataset, time_step=60):
-    X, y = [], []
-    for i in range(len(dataset)-time_step-1):
-        X.append(dataset[i:(i+time_step), 0])
-        y.append(dataset[i + time_step, 0])
-    return np.array(X), np.array(y)
-
-X, y = create_dataset(scaled_data)
-X = X.reshape(X.shape[0], X.shape[1], 1)
-
-# ---------------- Model ----------------
-@st.cache_resource
-def train_model(X, y):
-    model = Sequential()
-    model.add(LSTM(50, return_sequences=True, input_shape=(60,1)))
-    model.add(LSTM(50))
-    model.add(Dense(1))
-
-    model.compile(loss='mean_squared_error', optimizer='adam')
-    model.fit(X, y, epochs=2, batch_size=32, verbose=0)  # reduced epochs for speed
-    return model
-
-model = train_model(X, y)
-
-# ---------------- Prediction ----------------
+# ---------------- Prediction (LIGHTWEIGHT MODEL) ----------------
 def predict_future(days=30):
-    temp_input = scaled_data[-60:].reshape(1, -1)
-    temp_input = temp_input[0].tolist()
+    last_prices = data['Close'].tail(60).values
+    
+    predictions = []
+    temp = list(last_prices)
 
-    output = []
+    for _ in range(days):
+        next_val = sum(temp[-5:]) / 5   # moving average
+        temp.append(next_val)
+        predictions.append(next_val)
 
-    for i in range(days):
-        x_input = np.array(temp_input[-60:])
-        x_input = x_input.reshape(1, 60, 1)
-
-        yhat = model.predict(x_input, verbose=0)
-        temp_input.append(yhat[0][0])
-        output.append(yhat[0][0])
-
-    return scaler.inverse_transform(np.array(output).reshape(-1,1))
+    return np.array(predictions).reshape(-1,1)
 
 future_prices = predict_future(30)
 
+# ---------------- Show Predictions ----------------
 st.subheader("📈 Future Predictions")
 st.line_chart(future_prices)
 
