@@ -6,26 +6,36 @@ import numpy as np
 # ---------------- UI ----------------
 st.title("📈 AI Stock Predictor + Chatbot")
 
-ticker = st.text_input("Enter Stock Symbol (e.g., RELIANCE.NS)", "RELIANCE.NS")
+ticker = st.text_input("Enter Stock Symbol", "RELIANCE.NS")
 
 # ---------------- Load Data ----------------
 @st.cache_data
 def load_data(ticker):
-    data = yf.download(ticker, start="2015-01-01", end="2024-01-01")
-    data = data[['Close']]
-    data.dropna(inplace=True)
-    return data
+    try:
+        data = yf.download(ticker, period="1y", progress=False)
+        
+        if data is None or data.empty:
+            return None
+            
+        data = data[['Close']]
+        data.dropna(inplace=True)
+        return data
+        
+    except:
+        return None
 
 data = load_data(ticker)
 
-if data.empty:
-    st.error("Invalid stock symbol")
+# ---------------- Error Handling ----------------
+if data is None:
+    st.warning("⚠️ Could not fetch data. Try another stock symbol.")
     st.stop()
 
-st.subheader("📊 Stock Price")
+# ---------------- Chart ----------------
+st.subheader("📊 Stock Price (Last 1 Year)")
 st.line_chart(data)
 
-# ---------------- Prediction (LIGHTWEIGHT MODEL) ----------------
+# ---------------- Prediction ----------------
 def predict_future(days=30):
     last_prices = data['Close'].tail(60).values
     
@@ -42,7 +52,7 @@ def predict_future(days=30):
 future_prices = predict_future(30)
 
 # ---------------- Show Predictions ----------------
-st.subheader("📈 Future Predictions")
+st.subheader("📈 Future Predictions (Next 30 Days)")
 st.line_chart(future_prices)
 
 # ---------------- Chatbot ----------------
@@ -54,7 +64,7 @@ def answer_question(question):
     question = question.lower()
 
     if "trend" in question:
-        return "Check the chart above for trend 📊"
+        return "Check the chart above for the trend 📊"
 
     elif "price" in question or "future" in question:
         return f"Predicted next price: {future_prices[0][0]:.2f}"
@@ -63,11 +73,12 @@ def answer_question(question):
         return str(future_prices[:5].flatten())
 
     elif "invest" in question:
-        return "⚠️ Demo model — not financial advice"
+        return "⚠️ This is a demo model — not financial advice"
 
     else:
-        return "Ask about trend, future price, or next 5 days"
+        return "Try asking: trend, future price, next 5 days"
 
 if st.button("Ask"):
-    response = answer_question(user_input)
-    st.success(response)
+    if user_input:
+        response = answer_question(user_input)
+        st.success(response)
