@@ -29,7 +29,6 @@ st.title("📈 TCS Stock Predictor")
 # ============ LOAD DATA ============
 @st.cache_data
 def load_data():
-    """Load TCS data"""
     try:
         st.info("📥 Loading TCS data...")
         data = yf.download("TCS.NS", period="5y", progress=False, timeout=30)
@@ -56,21 +55,23 @@ def load_data():
 
 # ============ FEATURES ============
 def create_features(df):
-    """Create simple features"""
     df = df.copy()
+    
+    # Flatten any MultiIndex columns from yfinance
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+    
     df['Returns'] = df['Close'].pct_change()
     df['MA_5'] = df['Close'].rolling(5).mean()
     df['MA_20'] = df['Close'].rolling(20).mean()
     df['High_Low'] = df['High'] - df['Low']
     
-    # RSI
     delta = df['Close'].diff()
     gain = (delta.where(delta > 0, 0)).rolling(14).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
     rs = gain / loss
     df['RSI'] = 100 - (100 / (1 + rs))
     
-    # Lags
     for i in range(1, 4):
         df[f'Lag_{i}'] = df['Close'].shift(i)
     
@@ -79,7 +80,6 @@ def create_features(df):
 # ============ TRAIN MODEL ============
 @st.cache_resource
 def train_model(data):
-    """Train model"""
     df = create_features(data)
     
     cols = ['Open', 'High', 'Low', 'Volume', 'MA_5', 'MA_20', 'RSI', 'High_Low', 'Lag_1', 'Lag_2', 'Lag_3']
@@ -94,31 +94,34 @@ def train_model(data):
 
 # ============ PREDICT ============
 def predict_prices(model, df, cols, days=30):
-    """Predict future prices"""
     predictions = []
-    last_row = df.iloc[-1].copy()
+    
+    # Extract last row as a plain dict of Python scalars to avoid Series issues
+    last_row = {}
+    for col in df.columns:
+        val = df[col].iloc[-1]
+        if hasattr(val, 'item'):
+            val = val.item()
+        last_row[col] = float(val)
     
     for _ in range(days):
-        # Get features
-        features = []
-        for col in cols:
-            val = last_row[col]
-            # Ensure it's a Python scalar
-            if hasattr(val, 'item'):
-                val = val.item()
-            features.append(float(val))
-        
+        features = [last_row[col] for col in cols]
         X = np.array([features])
         next_price = float(model.predict(X)[0])
         predictions.append(next_price)
         
-        # Update row
+        # Update the dict with new scalar values
+        last_row['Lag_3'] = last_row['Lag_2']
+        last_row['Lag_2'] = last_row['Lag_1']
+        last_row['Lag_1'] = last_row['Close']
         last_row['Close'] = next_price
-        last_row['Lag_3'] = float(last_row['Lag_2'])
-        last_row['Lag_2'] = float(last_row['Lag_1'])
-        last_row['Lag_1'] = next_price
-        ma_5_val = float(np.mean([last_row['Lag_1'], last_row['Lag_2'], last_row['Lag_3'], next_price, last_row['Close']]))
-        last_row['MA_5'] = ma_5_val
+        last_row['MA_5'] = float(np.mean([
+            last_row['Close'],
+            last_row['Lag_1'],
+            last_row['Lag_2'],
+            last_row['Lag_3'],
+            next_price
+        ]))
     
     return np.array(predictions)
 
@@ -126,13 +129,16 @@ def predict_prices(model, df, cols, days=30):
 if 'question' not in st.session_state:
     st.session_state.question = ""
 
-# Load data
 with st.spinner("Loading model..."):
     data = load_data()
     if data is None:
         st.stop()
     
     model, cols, df_proc = train_model(data)
+
+# Flatten MultiIndex if present
+if isinstance(data.columns, pd.MultiIndex):
+    data.columns = data.columns.get_level_values(0)
 
 # Get current price
 close_prices = data['Close'].values.flatten()
@@ -162,7 +168,7 @@ history = data['Close'].tail(60)
 pred_dates = pd.date_range(data.index[-1], periods=31)[1:]
 
 chart_df = pd.DataFrame({
-    'Historical': list(history) + [None]*30,
+    'Historical': list(history.values.flatten()) + [None]*30,
     'Prediction': [None]*60 + list(future_prices[:30])
 })
 chart_df.index = pd.date_range(history.index[0], periods=len(chart_df))
@@ -213,11 +219,7 @@ elif 'buy' in question or 'invest' in question:
     else:
         st.success("✅ RSI in normal range")
     
-    if future_prices[30] > current_price:
-        trend = "📈 Upward"
-    else:
-        trend = "📉 Downward"
-    
+    trend = "📈 Upward" if future_prices[30] > current_price else "📉 Downward"
     st.write(f"30-day trend: {trend}")
     st.write("⚠️ Not financial advice. Consult advisor.")
 
