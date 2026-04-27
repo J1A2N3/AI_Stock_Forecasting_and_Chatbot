@@ -3,7 +3,6 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 from sklearn.ensemble import RandomForestRegressor
-from sklearn.preprocessing import MinMaxScaler
 import datetime
 import time
 
@@ -28,8 +27,6 @@ with st.sidebar:
         "HCL Technologies": "HCLTECH.NS",
         "HDFC Corp": "HDFC.NS",
         "ITC Limited": "ITC.NS",
-        "Bajaj Auto": "BAJAJAUT0.NS",
-        "Maruti Suzuki": "MARUTI.NS",
         "Apple (US)": "AAPL",
         "Microsoft (US)": "MSFT",
         "Google (US)": "GOOGL",
@@ -184,7 +181,7 @@ def load_data(ticker_symbol):
                     return None
             
             else:
-                st.error(f"❌ Error: {type(e).__name__} - {str(e)[:100]}")
+                st.error(f"❌ Error: {type(e).__name__}")
                 return None
     
     return None
@@ -221,7 +218,7 @@ def create_features(df):
 # ============ ML MODEL ============
 @st.cache_resource
 def train_model(data):
-    """Train Random Forest model - FIX: Use ravel() for y"""
+    """Train Random Forest model"""
     df = create_features(data)
     
     feature_cols = ['Open', 'High', 'Low', 'Volume', 'Returns', 'High_Low', 
@@ -229,8 +226,8 @@ def train_model(data):
                     'Volatility', 'RSI', 'Close_Lag_1', 'Close_Lag_2', 
                     'Close_Lag_3', 'Close_Lag_4', 'Close_Lag_5']
     
-    X = df[feature_cols]
-    y = df['Close'].values.ravel()  # FIX: Convert to 1D array and use ravel()
+    X = df[feature_cols].values  # Convert to numpy array
+    y = df['Close'].values.ravel()  # 1D array
     
     # Train model
     model = RandomForestRegressor(n_estimators=100, random_state=42, max_depth=10)
@@ -242,35 +239,51 @@ def train_model(data):
         'importance': model.feature_importances_
     }).sort_values('importance', ascending=False)
     
-    return model, feature_cols, feature_importance
+    return model, feature_cols, feature_importance, df
 
 # ============ PREDICTION ============
-def predict_future(model, data, feature_cols, days=30):
-    """Predict future prices"""
-    df = create_features(data)
+def predict_future(model, df, feature_cols, days=30):
+    """Predict future prices - FIXED: Proper scalar handling"""
     predictions = []
     
-    last_row = df.iloc[-1:].copy()
+    # Get last row as starting point
+    last_row_data = df.iloc[-1].copy()
     
     for _ in range(days):
-        X_pred = last_row[feature_cols]
-        next_price = model.predict(X_pred)[0]
+        # Prepare features - ensure all are scalars
+        X_pred = []
+        for col in feature_cols:
+            val = last_row_data[col]
+            # Convert Series to scalar if needed
+            if isinstance(val, (pd.Series, np.ndarray)):
+                val = float(val.flat[0])
+            X_pred.append(float(val))
+        
+        X_pred = np.array([X_pred])
+        
+        # Predict next price
+        next_price = float(model.predict(X_pred)[0])
         predictions.append(next_price)
         
-        new_row = last_row.copy()
-        new_row['Close'] = next_price
-        new_row['Close_Lag_5'] = new_row['Close_Lag_4'].values
-        new_row['Close_Lag_4'] = new_row['Close_Lag_3'].values
-        new_row['Close_Lag_3'] = new_row['Close_Lag_2'].values
-        new_row['Close_Lag_2'] = new_row['Close_Lag_1'].values
-        new_row['Close_Lag_1'] = next_price
-        new_row['MA_5'] = np.mean([new_row['Close_Lag_1'].values[0], 
-                                    new_row['Close_Lag_2'].values[0],
-                                    new_row['Close_Lag_3'].values[0],
-                                    new_row['Close_Lag_4'].values[0],
-                                    new_row['Close_Lag_5'].values[0]])
+        # Update row for next iteration
+        last_row_data['Close'] = next_price
+        last_row_data['Returns'] = (next_price - last_row_data['Close']) / last_row_data['Close']
+        last_row_data['Close_Lag_5'] = float(last_row_data['Close_Lag_4'])
+        last_row_data['Close_Lag_4'] = float(last_row_data['Close_Lag_3'])
+        last_row_data['Close_Lag_3'] = float(last_row_data['Close_Lag_2'])
+        last_row_data['Close_Lag_2'] = float(last_row_data['Close_Lag_1'])
+        last_row_data['Close_Lag_1'] = next_price
         
-        last_row = new_row
+        # Update moving average
+        ma_5_vals = [
+            last_row_data['Close_Lag_1'],
+            last_row_data['Close_Lag_2'],
+            last_row_data['Close_Lag_3'],
+            last_row_data['Close_Lag_4'],
+            last_row_data['Close_Lag_5']
+        ]
+        last_row_data['MA_5'] = float(np.mean(ma_5_vals))
+        last_row_data['Price_Change'] = next_price - last_row_data['Open']
     
     return np.array(predictions)
 
@@ -294,7 +307,7 @@ with st.spinner(f"Loading {ticker} and training model..."):
 
 try:
     progress_placeholder.info("🤖 Training machine learning model...")
-    model, feature_cols, feature_importance = train_model(data)
+    model, feature_cols, feature_importance, df_processed = train_model(data)
     close_series = data['Close'].dropna()
 
     if len(close_series) < 2:
@@ -308,6 +321,8 @@ try:
     
 except Exception as e:
     st.error(f"❌ Error during model training: {str(e)}")
+    import traceback
+    st.error(traceback.format_exc())
     st.stop()
 
 progress_placeholder.empty()
@@ -320,20 +335,22 @@ change_pct = (change / prev_price) * 100
 week_high = float(data['High'].tail(7).max())
 week_low = float(data['Low'].tail(7).min())
 
+currency = "₹" if "NS" in ticker else "$"
+
 with col1:
-    st.metric("Current Price", f"₹{current_price:.2f}" if "NS" in ticker else f"${current_price:.2f}")
+    st.metric("Current Price", f"{currency}{current_price:.2f}")
 
 with col2:
-    st.metric("Today's Change", f"₹{change:.2f}" if "NS" in ticker else f"${change:.2f}", f"{change_pct:.2f}%")
+    st.metric("Today's Change", f"{currency}{change:.2f}", f"{change_pct:.2f}%")
 
 with col3:
-    st.metric("Week High", f"₹{week_high:.2f}" if "NS" in ticker else f"${week_high:.2f}")
+    st.metric("Week High", f"{currency}{week_high:.2f}")
 
 with col4:
-    st.metric("Week Low", f"₹{week_low:.2f}" if "NS" in ticker else f"${week_low:.2f}")
+    st.metric("Week Low", f"{currency}{week_low:.2f}")
 
 # Generate predictions
-future_prices = predict_future(model, data, feature_cols, days=90)
+future_prices = predict_future(model, df_processed, feature_cols, days=90)
 df_with_features = create_features(data)
 
 # ============ CHARTS ============
@@ -373,7 +390,6 @@ with tab2:
     
     col1, col2, col3 = st.columns(3)
     with col1:
-        currency = "₹" if "NS" in ticker else "$"
         st.metric("Predicted Price (Next Day)", f"{currency}{future_prices[0]:.2f}")
     with col2:
         avg_pred = np.mean(future_prices[:pred_days])
@@ -414,7 +430,6 @@ st.subheader("💬 AI Assistant - Ask Anything")
 def answer_question(question, data, future_prices, model):
     """Intelligent Q&A system"""
     q = question.lower()
-    currency = "₹" if "NS" in ticker else "$"
     
     if any(word in q for word in ['current', 'price', 'now', 'today']):
         return f"📊 Current price: **{currency}{current_price:.2f}**\nToday's change: {currency}{change:.2f} ({change_pct:+.2f}%)"
