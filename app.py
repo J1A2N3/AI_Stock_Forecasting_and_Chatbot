@@ -5,6 +5,7 @@ import numpy as np
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.preprocessing import MinMaxScaler
 import datetime
+import time
 
 st.set_page_config(page_title="AI Stock Predictor", page_icon="📈", layout="wide")
 
@@ -99,19 +100,84 @@ with st.sidebar:
 
 st.title("📈 AI Stock Predictor - RELIANCE (Machine Learning)")
 
-# ---------------- LOAD DATA ----------------
+# ---------------- LOAD DATA WITH RATE LIMIT HANDLING ----------------
 @st.cache_data
 def load_data():
-    try:
-        # Download 5 years of data for better training
-        data = yf.download("RELIANCE.NS", period="5y", progress=False)
-        if data is None or data.empty:
-            return None
-        data = data.dropna()
-        return data
-    except Exception as e:
-        st.error(f"Error loading data: {e}")
-        return None
+    """Load stock data with rate limit handling, retries, and timeout"""
+    max_retries = 3
+    retry_delay = 5  # seconds
+    
+    for attempt in range(max_retries):
+        try:
+            # Add delay between retries to avoid rate limiting
+            if attempt > 0:
+                remaining = retry_delay * (attempt + 1)
+                st.warning(f"⏳ Rate limited. Waiting {remaining} seconds before retry (Attempt {attempt + 1}/{max_retries})...")
+                time.sleep(remaining)
+            
+            # Show loading message on first attempt
+            if attempt == 0:
+                st.info("📥 Loading RELIANCE stock data from Yahoo Finance...")
+            
+            # Download with explicit timeout and error handling
+            data = yf.download(
+                "RELIANCE.NS", 
+                period="5y", 
+                progress=False,
+                timeout=30
+            )
+            
+            if data is None or data.empty:
+                if attempt < max_retries - 1:
+                    st.warning("⚠️ No data returned. Retrying...")
+                    continue
+                else:
+                    st.error("❌ No data available after all retry attempts")
+                    return None
+            
+            # Clean data
+            data = data.dropna()
+            
+            if len(data) > 100:  # Ensure we have enough data
+                st.success(f"✅ Successfully loaded {len(data)} days of historical data!")
+                return data
+            else:
+                if attempt < max_retries - 1:
+                    st.warning(f"⚠️ Insufficient data ({len(data)} records). Retrying...")
+                    continue
+                else:
+                    st.error("❌ Could not load sufficient data")
+                    return None
+        
+        except Exception as e:
+            error_msg = str(e).lower()
+            
+            # Rate limit error handling
+            if "rate limit" in error_msg or "too many requests" in error_msg or "429" in error_msg:
+                if attempt < max_retries - 1:
+                    wait_time = retry_delay * (2 ** attempt)  # Exponential backoff
+                    st.warning(f"⏳ Yahoo Finance rate limit hit. Waiting {wait_time}s... (Attempt {attempt + 1}/{max_retries})")
+                    time.sleep(wait_time)
+                else:
+                    st.error("❌ Yahoo Finance rate limit exceeded after multiple retries")
+                    st.info("💡 **Solutions:**\n- Wait a few minutes and refresh the page\n- Check your internet connection\n- Try again during off-peak hours")
+                    return None
+            
+            # Network/timeout errors
+            elif "timeout" in error_msg or "connection" in error_msg:
+                if attempt < max_retries - 1:
+                    st.warning(f"⚠️ Connection issue. Retrying (Attempt {attempt + 1}/{max_retries})...")
+                    time.sleep(retry_delay)
+                else:
+                    st.error(f"❌ Could not connect to Yahoo Finance after {max_retries} attempts")
+                    return None
+            
+            # Other errors
+            else:
+                st.error(f"❌ Error loading data: {type(e).__name__} - {str(e)[:100]}")
+                return None
+    
+    return None
 
 # ---------------- FEATURE ENGINEERING ----------------
 def create_features(df):
@@ -207,42 +273,56 @@ def predict_future(model, data, feature_cols, days=30):
     
     return np.array(predictions)
 
-# ---------------- LOAD AND PROCESS DATA ----------------
-with st.spinner("Loading data and training model..."):
-    data = load_data()
-    
-    if data is None:
-        st.error("❌ Failed to load RELIANCE data.")
-        st.stop()
-    
-    model, feature_cols, feature_importance = train_model(data)
-    close_series = data['Close'].dropna()
-
-if len(close_series) < 2:
-    st.error("Not enough valid data")
-    st.stop()
-
-# FIX: Properly extract scalar values from Series
-current_price = float(close_series.iloc[-1])
-prev_price = float(close_series.iloc[-2])
-
-st.success("✅ Model trained successfully!")
-
-# Initialize session state
+# ============ MAIN APP LOGIC ============
+# Initialize session state first
 if 'chat_history' not in st.session_state:
     st.session_state.chat_history = []
 if 'user_question' not in st.session_state:
     st.session_state.user_question = ""
 if 'trigger_ask' not in st.session_state:
     st.session_state.trigger_ask = False
+if 'data_loaded' not in st.session_state:
+    st.session_state.data_loaded = False
+
+# Load and process data with status messages
+st.subheader("⏳ Loading and Training Model...")
+progress_placeholder = st.empty()
+
+with st.spinner("Loading data and training model..."):
+    data = load_data()
+    
+    if data is None:
+        st.stop()
+
+try:
+    progress_placeholder.info("🤖 Training machine learning model...")
+    model, feature_cols, feature_importance = train_model(data)
+    close_series = data['Close'].dropna()
+
+    if len(close_series) < 2:
+        st.error("❌ Not enough valid data for analysis")
+        st.stop()
+
+    current_price = float(close_series.iloc[-1])
+    prev_price = float(close_series.iloc[-2])
+    
+    progress_placeholder.success("✅ Model trained successfully!")
+    st.session_state.data_loaded = True
+    
+except Exception as e:
+    st.error(f"❌ Error during model training: {str(e)}")
+    st.stop()
+
+# Clear loading message
+progress_placeholder.empty()
 
 # ---------------- DISPLAY METRICS ----------------
 col1, col2, col3, col4 = st.columns(4)
 
 change = current_price - prev_price
 change_pct = (change / prev_price) * 100
-week_high = data['High'].tail(7).max()
-week_low = data['Low'].tail(7).min()
+week_high = float(data['High'].tail(7).max())
+week_low = float(data['Low'].tail(7).min())
 
 with col1:
     st.metric("Current Price", f"₹{current_price:.2f}")
