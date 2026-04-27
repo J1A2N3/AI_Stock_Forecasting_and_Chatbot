@@ -222,6 +222,7 @@ if len(close_series) < 2:
     st.error("Not enough valid data")
     st.stop()
 
+# FIX: Properly extract scalar values from Series
 current_price = float(close_series.iloc[-1])
 prev_price = float(close_series.iloc[-2])
 
@@ -326,7 +327,7 @@ with tab3:
         rsi_chart = df_with_features['RSI'].tail(100)
         st.line_chart(rsi_chart, height=300)
         
-        current_rsi = df_with_features['RSI'].iloc[-1]
+        current_rsi = float(df_with_features['RSI'].iloc[-1])
         if current_rsi > 70:
             st.warning("⚠️ RSI indicates overbought condition")
         elif current_rsi < 30:
@@ -395,7 +396,7 @@ def answer_question(question, data, future_prices, model):
     
     # Investment advice
     elif 'buy' in q or 'invest' in q or 'should i' in q:
-        rsi = df_with_features['RSI'].iloc[-1]
+        current_rsi = float(df_with_features['RSI'].iloc[-1])
         trend = "bullish 📈" if current_price > data['Close'].tail(20).mean() else "bearish 📉"
         prediction_trend = "Upward ⬆️" if future_prices[30] > current_price else "Downward ⬇️"
         
@@ -403,24 +404,24 @@ def answer_question(question, data, future_prices, model):
 
 **Current Status:**
 - Trend: {trend}
-- RSI: {rsi:.2f} {"(Overbought 🔴)" if rsi > 70 else "(Oversold 🟢)" if rsi < 30 else "(Neutral 🟡)"}
+- RSI: {current_rsi:.2f} {"(Overbought 🔴)" if current_rsi > 70 else "(Oversold 🟢)" if current_rsi < 30 else "(Neutral 🟡)"}
 - 30-day Prediction: {prediction_trend} movement expected
 
 **Signals:**
-{'- ✅ Positive indicators for entry' if rsi < 50 and prediction_trend.startswith('Up') else '- ⚠️ Mixed signals - exercise caution'}
+{'- ✅ Positive indicators for entry' if current_rsi < 50 and prediction_trend.startswith('Up') else '- ⚠️ Mixed signals - exercise caution'}
 
 ⚠️ **IMPORTANT DISCLAIMER**: This is an AI prediction model for educational purposes only. NOT financial advice. Always consult a certified financial advisor before investing."""
     
     # Volatility
     elif 'volatile' in q or 'risk' in q:
-        volatility = df_with_features['Volatility'].iloc[-1] * 100
+        volatility = float(df_with_features['Volatility'].iloc[-1]) * 100
         risk_level = 'High 🔴' if volatility > 2 else 'Moderate 🟡' if volatility > 1 else 'Low 🟢'
         return f"📊 **Volatility Analysis:**\n\nCurrent volatility: **{volatility:.2f}%**\nRisk level: **{risk_level}**"
     
     # Volume
     elif 'volume' in q:
         avg_vol = data['Volume'].tail(20).mean()
-        today_vol = data['Volume'].iloc[-1]
+        today_vol = float(data['Volume'].iloc[-1])
         vol_status = '📈 Above average' if today_vol > avg_vol else '📉 Below average'
         return f"📊 **Trading Volume:**\n\nToday: **{today_vol:,.0f}**\n20-day avg: {avg_vol:,.0f}\nStatus: {vol_status}"
     
